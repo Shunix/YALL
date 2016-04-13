@@ -1,5 +1,7 @@
 package com.shunix.yall;
 
+import android.content.Context;
+import android.os.Environment;
 import android.util.Log;
 
 import java.text.SimpleDateFormat;
@@ -19,25 +21,40 @@ public class Yall implements YallConfig {
     private static ConcurrentLinkedQueue<String> mLogQueue = new ConcurrentLinkedQueue<>();
     private static ScheduledExecutorService mExecutor = new ScheduledThreadPoolExecutor(1);
     private static SimpleDateFormat mDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+    private static Context mContext;
 
     private static Runnable scheduledTask = new Runnable() {
         @Override
         public void run() {
             int size = mLogQueue.size();
-            Iterator<String> iterator = mLogQueue.iterator();
-            int writtenCount = 0;
-            while (iterator.hasNext()) {
-                String logItem = iterator.next();
-                // TODO: 2016/4/12 write to file
-                mLogQueue.remove(logItem);
-                writtenCount++;
-                if (writtenCount == size) {
-                    break;
+            try {
+                Iterator<String> iterator = mLogQueue.iterator();
+                int writtenCount = 0;
+                while (iterator.hasNext()) {
+                    String logItem = iterator.next();
+                    // TODO: 2016/4/12 write to file
+                    iterator.remove();
+                    writtenCount++;
+                    if (writtenCount == size) {
+                        break;
+                    }
                 }
+            } catch (Exception e) {
+                Yall.log(LOG_LEVEL.ERROR, "Yall.ScheduledTask", e.getMessage());
             }
         }
     };
 
+    private static String getLogFilePath() {
+        if (mContext == null) {
+            return null;
+        }
+        if (Environment.isExternalStorageEmulated() && Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
+            
+        } else {
+
+        }
+    }
     /**
      * Get the caller method information
      * Format: Classname | Linenumber | Methodname
@@ -76,7 +93,8 @@ public class Yall implements YallConfig {
         return builder;
     }
 
-    public static void init() {
+    public static void init(Context context) {
+        mContext = context;
         mExecutor.scheduleWithFixedDelay(scheduledTask, SYNC_INTERVAL, SYNC_INTERVAL, TimeUnit.SECONDS);
     }
 
