@@ -17,4 +17,6 @@ public interface YallConfig {
     int SYNC_INTERVAL = 30; // Interval for flush logs to file, measured in seconds
     int CALL_DEPTH = 2;
     String LOG_COLUMN_SEPARATOR = "|";
+    String FILE_NAME_SEPARATOR = "-";
+    String LOG_DIR_NAME = "logs";
 }

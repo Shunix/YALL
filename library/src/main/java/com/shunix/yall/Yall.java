@@ -4,7 +4,13 @@ import android.content.Context;
 import android.os.Environment;
 import android.util.Log;
 
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.PrintWriter;
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -26,13 +32,20 @@ public class Yall implements YallConfig {
     private static Runnable scheduledTask = new Runnable() {
         @Override
         public void run() {
-            int size = mLogQueue.size();
             try {
+                File logFile = getLogFile();
+                if (logFile == null) {
+                    return;
+                }
+                FileOutputStream outputStream = new FileOutputStream(logFile);
+                PrintWriter writer = new PrintWriter(outputStream);
+                int size = mLogQueue.size();
                 Iterator<String> iterator = mLogQueue.iterator();
                 int writtenCount = 0;
                 while (iterator.hasNext()) {
                     String logItem = iterator.next();
-                    // TODO: 2016/4/12 write to file
+                    // FIXME may overwrite current content
+                    writer.write(logItem);
                     iterator.remove();
                     writtenCount++;
                     if (writtenCount == size) {
@@ -45,16 +58,45 @@ public class Yall implements YallConfig {
         }
     };
 
-    private static String getLogFilePath() {
+    private static File getLogFile() {
         if (mContext == null) {
             return null;
         }
+        File logFile = null;
         if (Environment.isExternalStorageEmulated() && Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
-            
-        } else {
-
+            File logsDir = new File(mContext.getExternalFilesDir(null), LOG_DIR_NAME);
+            if (logsDir.exists() || logsDir.mkdir()) {
+                logFile = new File(logsDir, getLogFileName());
+            }
         }
+        if (logFile == null) {
+            File logsDir = new File(mContext.getFilesDir(), LOG_DIR_NAME);
+            if (logsDir.exists() || logsDir.mkdir()) {
+                logFile = new File(logsDir, getLogFileName());
+            }
+        }
+        return logFile;
     }
+
+    private static String getLogFileName() {
+        Date date = new Date(System.currentTimeMillis());
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(date);
+        int year = calendar.get(Calendar.YEAR);
+        int month = calendar.get(Calendar.MONTH);
+        int day = calendar.get(Calendar.DAY_OF_MONTH);
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        StringBuilder builder = new StringBuilder();
+        if (mContext != null) {
+            builder.append(mContext.getPackageName()).append(FILE_NAME_SEPARATOR);
+        }
+        builder.append(year).append(FILE_NAME_SEPARATOR);
+        builder.append(month).append(FILE_NAME_SEPARATOR);
+        builder.append(day).append(FILE_NAME_SEPARATOR);
+        builder.append(hour);
+        return builder.toString();
+    }
+
     /**
      * Get the caller method information
      * Format: Classname | Linenumber | Methodname
@@ -138,7 +180,8 @@ public class Yall implements YallConfig {
                 .append(LOG_COLUMN_SEPARATOR)
                 .append(tag)
                 .append(LOG_COLUMN_SEPARATOR)
-                .append(msg);
+                .append(msg)
+                .append("\n");
         String message = builder.toString();
         mLogQueue.add(message);
         if (IS_WRITE_TO_LOGCAT) {
