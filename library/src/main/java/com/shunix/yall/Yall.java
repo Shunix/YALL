@@ -112,6 +112,7 @@ public class Yall implements YallConfig {
         builder.append(month).append(FILE_NAME_SEPARATOR);
         builder.append(day).append(FILE_NAME_SEPARATOR);
         builder.append(hour);
+        builder.append(LOG_FILE_EXTENTION);
         return builder.toString();
     }
 

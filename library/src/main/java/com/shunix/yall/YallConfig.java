@@ -19,4 +19,5 @@ public interface YallConfig {
     String LOG_COLUMN_SEPARATOR = "|";
     String FILE_NAME_SEPARATOR = "-";
     String LOG_DIR_NAME = "logs";
+    String LOG_FILE_EXTENTION = ".log";
 }
