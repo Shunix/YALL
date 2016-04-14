@@ -1,13 +1,14 @@
 package com.shunix.yall;
 
+import android.app.ActivityManager;
 import android.content.Context;
 import android.os.Environment;
+import android.text.TextUtils;
 import android.util.Log;
 
-import java.io.BufferedOutputStream;
+import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.PrintWriter;
+import java.io.FileWriter;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
@@ -23,29 +24,33 @@ import java.util.concurrent.TimeUnit;
  * @since 2016/04/08
  */
 public class Yall implements YallConfig {
-    private static ThreadLocal<StringBuilder> mLocalBuilder = new ThreadLocal<>();
+    private static ThreadLocal<StringBuilder> mLogItemBuilder = new ThreadLocal<>();
+    private static ThreadLocal<StringBuilder> mMethodInfoBuilder = new ThreadLocal<>();
     private static ConcurrentLinkedQueue<String> mLogQueue = new ConcurrentLinkedQueue<>();
     private static ScheduledExecutorService mExecutor = new ScheduledThreadPoolExecutor(1);
     private static SimpleDateFormat mDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
     private static Context mContext;
+    private static String mProcessName; // In case there's more than one process
 
     private static Runnable scheduledTask = new Runnable() {
         @Override
         public void run() {
+            File logFile = getLogFile();
+            if (logFile == null) {
+                return;
+            }
+            FileWriter fileWriter = null;
+            BufferedWriter writer = null;
             try {
-                File logFile = getLogFile();
-                if (logFile == null) {
-                    return;
-                }
-                FileOutputStream outputStream = new FileOutputStream(logFile);
-                PrintWriter writer = new PrintWriter(outputStream);
+                fileWriter = new FileWriter(logFile, true);
+                writer = new BufferedWriter(fileWriter);
                 int size = mLogQueue.size();
                 Iterator<String> iterator = mLogQueue.iterator();
                 int writtenCount = 0;
                 while (iterator.hasNext()) {
                     String logItem = iterator.next();
-                    // FIXME may overwrite current content
                     writer.write(logItem);
+                    writer.newLine();
                     iterator.remove();
                     writtenCount++;
                     if (writtenCount == size) {
@@ -53,7 +58,18 @@ public class Yall implements YallConfig {
                     }
                 }
             } catch (Exception e) {
-                Yall.log(LOG_LEVEL.ERROR, "Yall.ScheduledTask", e.getMessage());
+
+            } finally {
+                try {
+                    if (fileWriter != null) {
+                        fileWriter.close();
+                    }
+                    if (writer != null) {
+                        writer.close();
+                    }
+                } catch (Exception e) {
+
+                }
             }
         }
     };
@@ -63,17 +79,21 @@ public class Yall implements YallConfig {
             return null;
         }
         File logFile = null;
-        if (Environment.isExternalStorageEmulated() && Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
-            File logsDir = new File(mContext.getExternalFilesDir(null), LOG_DIR_NAME);
-            if (logsDir.exists() || logsDir.mkdir()) {
-                logFile = new File(logsDir, getLogFileName());
+        try {
+            if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
+                File logsDir = new File(mContext.getExternalFilesDir(null), LOG_DIR_NAME);
+                if (logsDir.exists() || logsDir.mkdir()) {
+                    logFile = new File(logsDir, getLogFileName());
+                }
             }
-        }
-        if (logFile == null) {
-            File logsDir = new File(mContext.getFilesDir(), LOG_DIR_NAME);
-            if (logsDir.exists() || logsDir.mkdir()) {
-                logFile = new File(logsDir, getLogFileName());
+            if (logFile == null) {
+                File logsDir = new File(mContext.getFilesDir(), LOG_DIR_NAME);
+                if (logsDir.exists() || logsDir.mkdir()) {
+                    logFile = new File(logsDir, getLogFileName());
+                }
             }
+        } catch (Exception e) {
+
         }
         return logFile;
     }
@@ -87,9 +107,7 @@ public class Yall implements YallConfig {
         int day = calendar.get(Calendar.DAY_OF_MONTH);
         int hour = calendar.get(Calendar.HOUR_OF_DAY);
         StringBuilder builder = new StringBuilder();
-        if (mContext != null) {
-            builder.append(mContext.getPackageName()).append(FILE_NAME_SEPARATOR);
-        }
+        builder.append(mProcessName).append(FILE_NAME_SEPARATOR);
         builder.append(year).append(FILE_NAME_SEPARATOR);
         builder.append(month).append(FILE_NAME_SEPARATOR);
         builder.append(day).append(FILE_NAME_SEPARATOR);
@@ -98,45 +116,90 @@ public class Yall implements YallConfig {
     }
 
     /**
-     * Get the caller method information
      * Format: Classname | Linenumber | Methodname
+     */
+    static class MethodInfo {
+        public String className;
+        public String methodName;
+        public int lineNumber;
+
+        @Override
+        public String toString() {
+            StringBuilder builder = getMethodInfoBuilder();
+            builder.append(className)
+                    .append(LOG_COLUMN_SEPARATOR)
+                    .append(lineNumber)
+                    .append(LOG_COLUMN_SEPARATOR)
+                    .append(methodName);
+            return builder.toString();
+        }
+    }
+
+    /**
+     * Get the caller method information
      *
      * @param callDepth
      * @return
      */
-    private static void appendMethodInfo(int callDepth, StringBuilder builder) {
+    private static MethodInfo getMethodInfo(int callDepth) {
         StackTraceElement[] stackTrace = new Throwable().getStackTrace();
         if (stackTrace.length > callDepth + 1) {
             StackTraceElement element = stackTrace[callDepth];
             if (element != null) {
-                builder.append(element.getClassName())
-                        .append(LOG_COLUMN_SEPARATOR)
-                        .append(element.getLineNumber())
-                        .append(LOG_COLUMN_SEPARATOR)
-                        .append(element.getMethodName())
-                        .append(LOG_COLUMN_SEPARATOR);
+                MethodInfo info = new MethodInfo();
+                info.className = element.getClassName();
+                info.methodName = element.getMethodName();
+                info.lineNumber = element.getLineNumber();
+                return info;
             }
         }
+        return null;
     }
 
-    private static void appendTime(StringBuilder builder) {
+    private static String getCurrentTime() {
         long timestamp = System.currentTimeMillis();
-        builder.append(mDateFormat.format(timestamp)).append(LOG_COLUMN_SEPARATOR);
+        return mDateFormat.format(timestamp);
     }
 
-    private static StringBuilder getLocalStringBuilder() {
-        StringBuilder builder = mLocalBuilder.get();
+    private static StringBuilder getLogItemBuilder() {
+        StringBuilder builder = mLogItemBuilder.get();
         if (builder != null) {
             builder.delete(0, builder.length());
         } else {
             builder = new StringBuilder();
-            mLocalBuilder.set(builder);
+            mLogItemBuilder.set(builder);
         }
         return builder;
     }
 
+    private static StringBuilder getMethodInfoBuilder() {
+        StringBuilder builder = mMethodInfoBuilder.get();
+        if (builder != null) {
+            builder.delete(0, builder.length());
+        } else {
+            builder = new StringBuilder();
+            mMethodInfoBuilder.set(builder);
+        }
+        return builder;
+    }
+
+    private static void initProcessName() {
+        if (mContext == null) {
+            return;
+        }
+        int pid = android.os.Process.myPid();
+        ActivityManager activityManager = (ActivityManager) mContext.getSystemService(Context.ACTIVITY_SERVICE);
+        for (ActivityManager.RunningAppProcessInfo info : activityManager.getRunningAppProcesses()) {
+            if (info != null && info.pid == pid) {
+                mProcessName = info.processName;
+                break;
+            }
+        }
+    }
+
     public static void init(Context context) {
         mContext = context;
+        initProcessName();
         mExecutor.scheduleWithFixedDelay(scheduledTask, SYNC_INTERVAL, SYNC_INTERVAL, TimeUnit.SECONDS);
     }
 
@@ -145,66 +208,111 @@ public class Yall implements YallConfig {
     }
 
     /**
-     * Add log message to queue
+     * Add logInner message to queue
      * Format : Time | Classname | Linenumber | Methodname | Level | Tag | Message
      *
      * @param level
      * @param tag
      * @param msg
      */
-    public static void log(LOG_LEVEL level, String tag, String msg) {
-        StringBuilder builder = getLocalStringBuilder();
-        appendTime(builder);
-        appendMethodInfo(CALL_DEPTH, builder);
+    private static void logInner(LOG_LEVEL level, String tag, String msg, int callDepth) {
+        StringBuilder builder = getLogItemBuilder();
+        String currentTime = getCurrentTime();
+        MethodInfo info = getMethodInfo(callDepth);
+        builder.append(currentTime).append(LOG_COLUMN_SEPARATOR);
+        if (info != null) {
+            builder.append(info.toString()).append(LOG_COLUMN_SEPARATOR);
+        } else {
+            // placeholder
+            builder.append(LOG_COLUMN_SEPARATOR)
+                    .append(LOG_COLUMN_SEPARATOR)
+                    .append(LOG_COLUMN_SEPARATOR);
+        }
         switch (level) {
             case DEBUG:
                 builder.append(LOG_LEVEL.DEBUG.name());
+                if (IS_WRITE_TO_LOGCAT) {
+                    Log.d(tag, msg);
+                }
                 break;
             case ERROR:
                 builder.append(LOG_LEVEL.ERROR.name());
+                if (IS_WRITE_TO_LOGCAT) {
+                    Log.e(tag, msg);
+                }
                 break;
             case INFO:
                 builder.append(LOG_LEVEL.INFO.name());
+                if (IS_WRITE_TO_LOGCAT) {
+                    Log.i(tag, msg);
+                }
                 break;
             case VERBOSE:
                 builder.append(LOG_LEVEL.VERBOSE.name());
+                if (IS_WRITE_TO_LOGCAT) {
+                    Log.v(tag, msg);
+                }
                 break;
             case WARN:
                 builder.append(LOG_LEVEL.WARN.name());
+                if (IS_WRITE_TO_LOGCAT) {
+                    Log.w(tag, msg);
+                }
                 break;
             case WTF:
                 builder.append(LOG_LEVEL.WTF.name());
+                if (IS_WRITE_TO_LOGCAT) {
+                    Log.wtf(tag, msg);
+                }
                 break;
         }
         builder
                 .append(LOG_COLUMN_SEPARATOR)
                 .append(tag)
                 .append(LOG_COLUMN_SEPARATOR)
-                .append(msg)
-                .append("\n");
-        String message = builder.toString();
-        mLogQueue.add(message);
-        if (IS_WRITE_TO_LOGCAT) {
-            switch (level) {
-                case DEBUG:
-                    Log.d(tag, message);
-                    break;
-                case ERROR:
-                    Log.e(tag, message);
-                    break;
-                case INFO:
-                    Log.i(tag, message);
-                    break;
-                case VERBOSE:
-                    Log.v(tag, message);
-                    break;
-                case WARN:
-                    Log.w(tag, message);
-                    break;
-                case WTF:
-                    Log.wtf(tag, message);
-                    break;
-            }
+                .append(msg);
+        mLogQueue.add(builder.toString());
+    }
+
+    public static void log(LOG_LEVEL level, String tag, String msg) {
+        logInner(level, tag, msg, CALL_DEPTH + 1);
+    }
+
+    /**
+     * Shortcut method, use class name as logInner tag.
+     * If proguard is enabled and caller class is obfuscated,
+     * the tag is meaningless.
+     *
+     * @param level
+     * @param msg
+     */
+    public static void log(LOG_LEVEL level, String msg) {
+        MethodInfo info = getMethodInfo(CALL_DEPTH);
+        if (info != null) {
+            logInner(level, info.className, msg, CALL_DEPTH + 1);
+        }
+    }
+
+    public static void log(LOG_LEVEL level, String tag, String msg, Throwable tr) {
+        String logMsg;
+        if (!TextUtils.isEmpty(msg)) {
+            logMsg = msg + "\t" + Log.getStackTraceString(tr);
+        } else {
+            logMsg = Log.getStackTraceString(tr);
+        }
+        logInner(level, tag, logMsg, CALL_DEPTH + 1);
+    }
+
+    public static void log(LOG_LEVEL level, String tag, Throwable tr) {
+        if (tr != null) {
+            logInner(level, tag, Log.getStackTraceString(tr), CALL_DEPTH + 1);
+        }
+    }
+
+    public static void log(LOG_LEVEL level, Throwable tr) {
+        MethodInfo info = getMethodInfo(CALL_DEPTH);
+        if (tr != null && info != null) {
+            logInner(level, info.className, Log.getStackTraceString(tr), CALL_DEPTH + 1);
         }
     }
 }
