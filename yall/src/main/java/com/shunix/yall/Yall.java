@@ -57,6 +57,8 @@ public class Yall implements YallConfig {
                         break;
                     }
                 }
+                fileWriter.flush();
+                writer.flush();
             } catch (Exception e) {
 
             } finally {
