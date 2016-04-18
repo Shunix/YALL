@@ -6,18 +6,15 @@ import android.os.Environment;
 import android.text.TextUtils;
 import android.util.Log;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
+import java.io.*;
 import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.Iterator;
-import java.util.Locale;
+import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * @author shunix
@@ -60,7 +57,7 @@ public class Yall implements YallConfig {
                 fileWriter.flush();
                 writer.flush();
             } catch (Exception e) {
-
+                Yall.log(LOG_LEVEL.ERROR, e);
             } finally {
                 try {
                     if (fileWriter != null) {
@@ -70,7 +67,7 @@ public class Yall implements YallConfig {
                         writer.close();
                     }
                 } catch (Exception e) {
-
+                    Yall.log(LOG_LEVEL.ERROR, e);
                 }
             }
         }
@@ -95,7 +92,7 @@ public class Yall implements YallConfig {
                 }
             }
         } catch (Exception e) {
-
+            Yall.log(LOG_LEVEL.ERROR, e);
         }
         return logFile;
     }
@@ -142,7 +139,7 @@ public class Yall implements YallConfig {
      * Get the caller method information
      *
      * @param callDepth
-     * @return
+     * @return info
      */
     private static MethodInfo getMethodInfo(int callDepth) {
         StackTraceElement[] stackTrace = new Throwable().getStackTrace();
@@ -196,6 +193,117 @@ public class Yall implements YallConfig {
             if (info != null && info.pid == pid) {
                 mProcessName = info.processName;
                 break;
+            }
+        }
+    }
+
+    private static File getLogFilesDir() {
+        File logsDir = null;
+        if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
+            logsDir = new File(mContext.getExternalFilesDir(null), LOG_DIR_NAME);
+        } else {
+            logsDir = new File(mContext.getFilesDir(), LOG_DIR_NAME);
+        }
+        return logsDir;
+    }
+
+    /**
+     * Pack the log files form startTime to endTime into a zip file.
+     *
+     * @param startTime start time in milliseconds
+     * @param endTime end time in milliseconds
+     */
+    public static void packageLogFiles(long startTime, long endTime) {
+        List<String> logFileNames = getPackLogFileList(startTime, endTime);
+        if (logFileNames != null) {
+            zipFiles(logFileNames, PACKED_FILE_NAME);
+        }
+    }
+
+    private static List<String> getPackLogFileList(final long startTime, final long endTime) {
+        if (endTime > startTime) {
+            return null;
+        }
+        List<String> fileList = new ArrayList<>();
+        try {
+            File logsDir = getLogFilesDir();
+            String[] fileNames = logsDir.list(new FilenameFilter() {
+                @Override
+                public boolean accept(File file, String s) {
+                    for (long time = startTime; time <= endTime; time += 60 * 60 * 1000) {
+                        Date date = new Date(time);
+                        Calendar calendar = Calendar.getInstance();
+                        calendar.setTime(date);
+                        int year = calendar.get(Calendar.YEAR);
+                        int month = calendar.get(Calendar.MONTH);
+                        int day = calendar.get(Calendar.DAY_OF_MONTH);
+                        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+                        StringBuilder builder = new StringBuilder();
+                        builder
+                                .append(year)
+                                .append(FILE_NAME_SEPARATOR)
+                                .append(month)
+                                .append(FILE_NAME_SEPARATOR)
+                                .append(day)
+                                .append(FILE_NAME_SEPARATOR)
+                                .append(hour);
+                        if (s.contains(builder.toString()) && s.endsWith(LOG_FILE_EXTENTION)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            });
+            if (fileNames != null) {
+                fileList.addAll(Arrays.asList(fileNames));
+            }
+        } catch (Exception e) {
+            Yall.log(LOG_LEVEL.ERROR, e);
+        }
+        return fileList;
+    }
+
+    private static void zipFiles(List<String> fileNames, String zipFileName) {
+        ZipOutputStream zipOutputStream = null;
+        try {
+            File logsDir = getLogFilesDir();
+            File zipFile = new File(logsDir, zipFileName);
+            zipOutputStream = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(zipFile)));
+            byte[] buffer = new byte[1024 * 8]; // default BufferedInputStream buffer size is 8192
+            int entrySize = fileNames.size();
+            for (int i = 0; i < entrySize; ++i) {
+                FileInputStream fileInputStream = null;
+                BufferedInputStream bufferedInputStream = null;
+                try {
+                    String fileName = fileNames.get(i);
+                    fileInputStream = new FileInputStream(fileName);
+                    bufferedInputStream = new BufferedInputStream(fileInputStream);
+                    ZipEntry entry = new ZipEntry(fileName.substring(fileName.lastIndexOf('/')));
+                    zipOutputStream.putNextEntry(entry);
+                    int len = -1;
+                    while((len = fileInputStream.read(buffer)) != -1) {
+                        zipOutputStream.write(buffer, 0, len);
+                    }
+                } catch (Exception e) {
+                    Yall.log(LOG_LEVEL.ERROR, e);
+                } finally {
+                    if (fileInputStream != null) {
+                        fileInputStream.close();
+                    }
+                    if (bufferedInputStream != null) {
+                        bufferedInputStream.close();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Yall.log(LOG_LEVEL.ERROR, e);
+        } finally {
+            try {
+                if (zipOutputStream != null) {
+                    zipOutputStream.close();
+                }
+            } catch (Exception e) {
+                Yall.log(LOG_LEVEL.ERROR, e);
             }
         }
     }

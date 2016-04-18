@@ -20,4 +20,5 @@ public interface YallConfig {
     String FILE_NAME_SEPARATOR = "-";
     String LOG_DIR_NAME = "logs";
     String LOG_FILE_EXTENTION = ".log";
+    String PACKED_FILE_NAME = "pack.zip";
 }
