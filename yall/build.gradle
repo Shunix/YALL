@@ -97,9 +97,13 @@ artifacts {
 
 bintray {
     Properties properties = new Properties()
-    properties.load(project.rootProject.file('local.properties').newDataInputStream())
-    user = properties.getProperty("bintray.user")
-    key = properties.getProperty("bintray.apikey")
+    boolean isLocal = false;
+    if (project.rootProject.findProject('local.properties') != null) {
+        isLocal = true;
+        properties.load(project.rootProject.file('local.properties').newDataInputStream())    
+    }
+    user = isLocal ? properties.getProperty("bintray.user") : System.getenv("bintray.user")
+    key = isLocal ? properties.getProperty("bintray.apikey") : System.getenv("bintray.apikey")
 
     configurations = ['archives']
     pkg {
@@ -112,7 +116,7 @@ bintray {
         version {
             gpg {
                 sign = true
-                passphrase = properties.getProperty("bintray.gpg.password")
+                passphrase = isLocal ? properties.getProperty("bintray.gpg.password") : System.getenv("bintray.gpg.password")
             }
         }
     }
