@@ -98,7 +98,7 @@ artifacts {
 bintray {
     Properties properties = new Properties()
     boolean isLocal = false;
-    if (project.rootProject.file('local.properties') != null) {
+    if (project.rootProject.file('local.properties').exists()) {
         isLocal = true;
         properties.load(project.rootProject.file('local.properties').newDataInputStream())    
     }
